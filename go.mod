@@ -1,4 +1,4 @@
-module yamlvalid
+module project_yaml
 
 go 1.18
 
