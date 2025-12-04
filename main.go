@@ -61,21 +61,22 @@ func validateInt(node *yaml.Node, field string) (int, error) {
 	if node.Kind != yaml.ScalarNode {
 		return 0, fmt.Errorf("%s must be int", field)
 	}
-	if node.Tag == "!!int" {
+	switch node.Tag {
+	case "!!int":
 		val, err := strconv.Atoi(node.Value)
 		if err != nil {
 			return 0, fmt.Errorf("%s must be int", field)
 		}
 		return val, nil
-	}
-	if node.Tag == "!!str" {
+	case "!!str":
 		val, err := strconv.Atoi(node.Value)
 		if err != nil {
 			return 0, fmt.Errorf("%s must be int", field)
 		}
 		return val, nil
+	default:
+		return 0, fmt.Errorf("%s must be int", field)
 	}
-	return 0, fmt.Errorf("%s must be int", field)
 }
 
 // validatePort проверяет, что порт в допустимом диапазоне
