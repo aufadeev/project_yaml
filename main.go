@@ -127,6 +127,8 @@ func validateMetadata(node *yaml.Node) []ValidationError {
 		errors = append(errors, ValidationError{Message: "name is required"})
 	} else if name.Kind != yaml.ScalarNode {
 		errors = append(errors, ValidationError{Line: name.Line, Message: "name must be string"})
+	} else if name.Value == "" {
+		errors = append(errors, ValidationError{Line: name.Line, Message: "name is required"})
 	}
 
 	// namespace (optional)
@@ -231,6 +233,8 @@ func validateContainer(node *yaml.Node) []ValidationError {
 		errors = append(errors, ValidationError{Message: "name is required"})
 	} else if name.Kind != yaml.ScalarNode {
 		errors = append(errors, ValidationError{Line: name.Line, Message: "name must be string"})
+	} else if name.Value == "" {
+		errors = append(errors, ValidationError{Line: name.Line, Message: "name is required"})
 	} else if !snakeCaseRegex.MatchString(name.Value) {
 		errors = append(errors, ValidationError{Line: name.Line, Message: "name has invalid format '" + name.Value + "'"})
 	}
@@ -407,14 +411,20 @@ func validateResourceSpec(node *yaml.Node, fieldName string) []ValidationError {
 
 	fields := parseMapping(node)
 
-	// cpu (optional)
+	// cpu (optional) - can be int or string with int
 	if cpu, exists := fields["cpu"]; exists {
 		if cpu.Kind != yaml.ScalarNode {
 			errors = append(errors, ValidationError{Line: cpu.Line, Message: "cpu must be int"})
 		} else {
-			_, err := strconv.Atoi(cpu.Value)
-			if err != nil {
+			// CPU must be an integer, not a quoted string
+			// Check the tag to see if it was originally an integer
+			if cpu.Tag == "!!str" {
 				errors = append(errors, ValidationError{Line: cpu.Line, Message: "cpu must be int"})
+			} else {
+				_, err := strconv.Atoi(cpu.Value)
+				if err != nil {
+					errors = append(errors, ValidationError{Line: cpu.Line, Message: "cpu must be int"})
+				}
 			}
 		}
 	}
