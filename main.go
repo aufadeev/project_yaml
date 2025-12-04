@@ -3,7 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
-	//"path/filepath"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -36,48 +36,73 @@ func findNodeByKey(parent *yaml.Node, key string) *yaml.Node {
 }
 
 func requireField(parent *yaml.Node, key string) (*yaml.Node, error) {
-	if node := findNodeByKey(parent, key); node != nil {
-		return node, nil
+	node := findNodeByKey(parent, key)
+	if node == nil {
+		return nil, fmt.Errorf("%s is required", key)
 	}
-	return nil, fmt.Errorf("%s is required", key)
+	return node, nil
 }
 
+// Принимаем любой scalar как строку (включая пустую)
 func validateString(node *yaml.Node, field string) error {
-	if node.Kind == yaml.ScalarNode && (node.Tag == "!!str" || node.Tag == "!!null") {
+	if node.Kind == yaml.ScalarNode {
 		return nil
 	}
 	return fmt.Errorf("%s must be string", field)
 }
 
+// Принимаем любой scalar, который можно распарсить как int (включая строки "123")
 func validateInt(node *yaml.Node, field string) error {
 	if node.Kind != yaml.ScalarNode {
 		return fmt.Errorf("%s must be int", field)
 	}
-	switch node.Tag {
-	case "!!int":
-		_, err := strconv.Atoi(node.Value)
-		if err != nil {
-			return fmt.Errorf("%s must be int", field)
-		}
-	case "!!str":
-		_, err := strconv.Atoi(node.Value)
-		if err != nil {
-			return fmt.Errorf("%s must be int", field)
-		}
-	default:
+	if _, err := strconv.Atoi(node.Value); err != nil {
 		return fmt.Errorf("%s must be int", field)
 	}
 	return nil
 }
 
-// Просто проверяем, что os.name — строка. Значение не проверяем.
+func validateObjectMeta(node *yaml.Node, file string) error {
+	if node.Kind != yaml.MappingNode {
+		return &ValidationError{File: file, Line: node.Line, Msg: "metadata must be object"}
+	}
+
+	nameNode, err := requireField(node, "name")
+	if err != nil {
+		return &ValidationError{File: file, Msg: "metadata.name is required"}
+	}
+	if err := validateString(nameNode, "metadata.name"); err != nil {
+		return &ValidationError{File: file, Line: nameNode.Line, Msg: err.Error()}
+	}
+
+	if nsNode := findNodeByKey(node, "namespace"); nsNode != nil {
+		if err := validateString(nsNode, "metadata.namespace"); err != nil {
+			return &ValidationError{File: file, Line: nsNode.Line, Msg: err.Error()}
+		}
+	}
+
+	if labelsNode := findNodeByKey(node, "labels"); labelsNode != nil {
+		if labelsNode.Kind != yaml.MappingNode {
+			return &ValidationError{File: file, Line: labelsNode.Line, Msg: "metadata.labels must be object"}
+		}
+		for i := 0; i < len(labelsNode.Content); i += 2 {
+			valNode := labelsNode.Content[i+1]
+			if err := validateString(valNode, "metadata.labels value"); err != nil {
+				return &ValidationError{File: file, Line: valNode.Line, Msg: "metadata.labels value must be string"}
+			}
+		}
+	}
+
+	return nil
+}
+
 func validatePodOS(node *yaml.Node, file string) error {
 	if node.Kind != yaml.MappingNode {
 		return &ValidationError{File: file, Line: node.Line, Msg: "os must be object"}
 	}
 	nameNode, err := requireField(node, "name")
 	if err != nil {
-		return &ValidationError{File: file, Msg: err.Error()}
+		return &ValidationError{File: file, Msg: "spec.os.name is required"}
 	}
 	if err := validateString(nameNode, "spec.os.name"); err != nil {
 		return &ValidationError{File: file, Line: nameNode.Line, Msg: err.Error()}
@@ -92,23 +117,23 @@ func validateHTTPGetAction(node *yaml.Node, prefix, file string) error {
 
 	pathNode, err := requireField(node, "path")
 	if err != nil {
-		return &ValidationError{File: file, Msg: prefix + "." + err.Error()}
+		return &ValidationError{File: file, Msg: prefix + ".path is required"}
 	}
 	if err := validateString(pathNode, prefix+".path"); err != nil {
 		return &ValidationError{File: file, Line: pathNode.Line, Msg: err.Error()}
 	}
-	// Проверка, что путь начинается с / — ОСТАВЛЕНА, так как в примерах она есть
 	if !strings.HasPrefix(pathNode.Value, "/") {
 		return &ValidationError{File: file, Line: pathNode.Line, Msg: fmt.Sprintf("%s.path has invalid format '%s'", prefix, pathNode.Value)}
 	}
 
 	portNode, err := requireField(node, "port")
 	if err != nil {
-		return &ValidationError{File: file, Msg: prefix + "." + err.Error()}
+		return &ValidationError{File: file, Msg: prefix + ".port is required"}
 	}
 	if err := validateInt(portNode, prefix+".port"); err != nil {
 		return &ValidationError{File: file, Line: portNode.Line, Msg: err.Error()}
 	}
+
 	return nil
 }
 
@@ -116,30 +141,12 @@ func validateProbe(node *yaml.Node, prefix, file string) error {
 	if node.Kind != yaml.MappingNode {
 		return &ValidationError{File: file, Line: node.Line, Msg: prefix + " must be object"}
 	}
-	httpGet, err := requireField(node, "httpGet")
+	httpGetNode, err := requireField(node, "httpGet")
 	if err != nil {
-		return &ValidationError{File: file, Msg: prefix + "." + err.Error()}
+		return &ValidationError{File: file, Msg: prefix + ".httpGet is required"}
 	}
-	return validateHTTPGetAction(httpGet, prefix+".httpGet", file)
-}
-
-func validateResource(node *yaml.Node, prefix, file string) error {
-	if node.Kind != yaml.MappingNode {
-		return &ValidationError{File: file, Line: node.Line, Msg: prefix + " must be object"}
-	}
-	for i := 0; i < len(node.Content); i += 2 {
-		key := node.Content[i].Value
-		val := node.Content[i+1]
-		switch key {
-		case "cpu":
-			if err := validateInt(val, prefix+".cpu"); err != nil {
-				return &ValidationError{File: file, Line: val.Line, Msg: err.Error()}
-			}
-		case "memory":
-			if err := validateString(val, prefix+".memory"); err != nil {
-				return &ValidationError{File: file, Line: val.Line, Msg: err.Error()}
-			}
-		}
+	if err := validateHTTPGetAction(httpGetNode, prefix+".httpGet", file); err != nil {
+		return err
 	}
 	return nil
 }
@@ -148,16 +155,42 @@ func validateResourceRequirements(node *yaml.Node, prefix, file string) error {
 	if node.Kind != yaml.MappingNode {
 		return &ValidationError{File: file, Line: node.Line, Msg: prefix + " must be object"}
 	}
-	if limits := findNodeByKey(node, "limits"); limits != nil {
-		if err := validateResource(limits, prefix+".limits", file); err != nil {
+
+	checkResource := func(parent *yaml.Node, kind string) error {
+		if parent == nil {
+			return nil
+		}
+		if parent.Kind != yaml.MappingNode {
+			return &ValidationError{File: file, Line: parent.Line, Msg: fmt.Sprintf("%s.%s must be object", prefix, kind)}
+		}
+		for i := 0; i < len(parent.Content); i += 2 {
+			valNode := parent.Content[i+1]
+			key := parent.Content[i].Value
+			switch key {
+			case "cpu":
+				if err := validateInt(valNode, fmt.Sprintf("%s.%s.cpu", prefix, kind)); err != nil {
+					return &ValidationError{File: file, Line: valNode.Line, Msg: err.Error()}
+				}
+			case "memory":
+				if err := validateString(valNode, fmt.Sprintf("%s.%s.memory", prefix, kind)); err != nil {
+					return &ValidationError{File: file, Line: valNode.Line, Msg: err.Error()}
+				}
+			}
+		}
+		return nil
+	}
+
+	if limitsNode := findNodeByKey(node, "limits"); limitsNode != nil {
+		if err := checkResource(limitsNode, "limits"); err != nil {
 			return err
 		}
 	}
-	if requests := findNodeByKey(node, "requests"); requests != nil {
-		if err := validateResource(requests, prefix+".requests", file); err != nil {
+	if requestsNode := findNodeByKey(node, "requests"); requestsNode != nil {
+		if err := checkResource(requestsNode, "requests"); err != nil {
 			return err
 		}
 	}
+
 	return nil
 }
 
@@ -165,60 +198,70 @@ func validateContainerPort(node *yaml.Node, file string) error {
 	if node.Kind != yaml.MappingNode {
 		return &ValidationError{File: file, Line: node.Line, Msg: "ports item must be object"}
 	}
-	containerPort, err := requireField(node, "containerPort")
+
+	containerPortNode, err := requireField(node, "containerPort")
 	if err != nil {
 		return &ValidationError{File: file, Msg: "containerPort is required"}
 	}
-	if err := validateInt(containerPort, "containerPort"); err != nil {
-		return &ValidationError{File: file, Line: containerPort.Line, Msg: err.Error()}
+	if err := validateInt(containerPortNode, "containerPort"); err != nil {
+		return &ValidationError{File: file, Line: containerPortNode.Line, Msg: err.Error()}
 	}
+
 	return nil
 }
 
-func validateContainer(node *yaml.Node, file string, idx int) error {
+func validateContainer(node *yaml.Node, file string, index int) error {
 	if node.Kind != yaml.MappingNode {
-		return &ValidationError{File: file, Line: node.Line, Msg: fmt.Sprintf("containers[%d] must be object", idx)}
+		return &ValidationError{File: file, Line: node.Line, Msg: fmt.Sprintf("containers[%d] must be object", index)}
 	}
 
-	if name, err := requireField(node, "name"); err != nil {
-		return &ValidationError{File: file, Msg: fmt.Sprintf("containers[%d].name is required", idx)}
-	} else if err := validateString(name, fmt.Sprintf("containers[%d].name", idx)); err != nil {
-		return &ValidationError{File: file, Line: name.Line, Msg: err.Error()}
+	nameNode, err := requireField(node, "name")
+	if err != nil {
+		return &ValidationError{File: file, Msg: fmt.Sprintf("containers[%d].name is required", index)}
+	}
+	if err := validateString(nameNode, fmt.Sprintf("containers[%d].name", index)); err != nil {
+		return &ValidationError{File: file, Line: nameNode.Line, Msg: err.Error()}
 	}
 
-	if image, err := requireField(node, "image"); err != nil {
-		return &ValidationError{File: file, Msg: fmt.Sprintf("containers[%d].image is required", idx)}
-	} else if err := validateString(image, fmt.Sprintf("containers[%d].image", idx)); err != nil {
-		return &ValidationError{File: file, Line: image.Line, Msg: err.Error()}
+	imageNode, err := requireField(node, "image")
+	if err != nil {
+		return &ValidationError{File: file, Msg: fmt.Sprintf("containers[%d].image is required", index)}
+	}
+	if err := validateString(imageNode, fmt.Sprintf("containers[%d].image", index)); err != nil {
+		return &ValidationError{File: file, Line: imageNode.Line, Msg: err.Error()}
+	}
+	if !strings.Contains(imageNode.Value, ":") {
+		return &ValidationError{File: file, Line: imageNode.Line, Msg: fmt.Sprintf("containers[%d].image has invalid format '%s'", index, imageNode.Value)}
 	}
 
-	if ports := findNodeByKey(node, "ports"); ports != nil {
-		if ports.Kind != yaml.SequenceNode {
-			return &ValidationError{File: file, Line: ports.Line, Msg: "containers[].ports must be array"}
+	if portsNode := findNodeByKey(node, "ports"); portsNode != nil {
+		if portsNode.Kind != yaml.SequenceNode {
+			return &ValidationError{File: file, Line: portsNode.Line, Msg: "containers[].ports must be array"}
 		}
-		for _, p := range ports.Content {
-			if err := validateContainerPort(p, file); err != nil {
+		for _, portItem := range portsNode.Content {
+			if err := validateContainerPort(portItem, file); err != nil {
 				return err
 			}
 		}
 	}
 
-	if rp := findNodeByKey(node, "readinessProbe"); rp != nil {
-		if err := validateProbe(rp, fmt.Sprintf("containers[%d].readinessProbe", idx), file); err != nil {
-			return err
-		}
-	}
-	if lp := findNodeByKey(node, "livenessProbe"); lp != nil {
-		if err := validateProbe(lp, fmt.Sprintf("containers[%d].livenessProbe", idx), file); err != nil {
+	if rpNode := findNodeByKey(node, "readinessProbe"); rpNode != nil {
+		if err := validateProbe(rpNode, fmt.Sprintf("containers[%d].readinessProbe", index), file); err != nil {
 			return err
 		}
 	}
 
-	resources, err := requireField(node, "resources")
-	if err != nil {
-		return &ValidationError{File: file, Msg: fmt.Sprintf("containers[%d].resources is required", idx)}
+	if lpNode := findNodeByKey(node, "livenessProbe"); lpNode != nil {
+		if err := validateProbe(lpNode, fmt.Sprintf("containers[%d].livenessProbe", index), file); err != nil {
+			return err
+		}
 	}
-	if err := validateResourceRequirements(resources, fmt.Sprintf("containers[%d].resources", idx), file); err != nil {
+
+	resourcesNode, err := requireField(node, "resources")
+	if err != nil {
+		return &ValidationError{File: file, Msg: fmt.Sprintf("containers[%d].resources is required", index)}
+	}
+	if err := validateResourceRequirements(resourcesNode, fmt.Sprintf("containers[%d].resources", index), file); err != nil {
 		return err
 	}
 
@@ -232,8 +275,8 @@ func validateContainers(node *yaml.Node, file string) error {
 	if len(node.Content) == 0 {
 		return &ValidationError{File: file, Msg: "spec.containers is required"}
 	}
-	for i, c := range node.Content {
-		if err := validateContainer(c, file, i); err != nil {
+	for i, container := range node.Content {
+		if err := validateContainer(container, file, i); err != nil {
 			return err
 		}
 	}
@@ -244,76 +287,71 @@ func validatePodSpec(node *yaml.Node, file string) error {
 	if node.Kind != yaml.MappingNode {
 		return &ValidationError{File: file, Line: node.Line, Msg: "spec must be object"}
 	}
+
 	if osNode := findNodeByKey(node, "os"); osNode != nil {
 		if err := validatePodOS(osNode, file); err != nil {
 			return err
 		}
 	}
-	containers, err := requireField(node, "containers")
+
+	containersNode, err := requireField(node, "containers")
 	if err != nil {
 		return &ValidationError{File: file, Msg: "spec.containers is required"}
 	}
-	return validateContainers(containers, file)
-}
+	if err := validateContainers(containersNode, file); err != nil {
+		return err
+	}
 
-func validateObjectMeta(node *yaml.Node, file string) error {
-	if node.Kind != yaml.MappingNode {
-		return &ValidationError{File: file, Line: node.Line, Msg: "metadata must be object"}
-	}
-	name, err := requireField(node, "name")
-	if err != nil {
-		return &ValidationError{File: file, Msg: "metadata.name is required"}
-	}
-	if err := validateString(name, "metadata.name"); err != nil {
-		return &ValidationError{File: file, Line: name.Line, Msg: err.Error()}
-	}
 	return nil
 }
 
 func validateTopLevel(node *yaml.Node, file string) error {
-	if node.Kind != yaml.DocumentNode || len(node.Content) == 0 {
-		return &ValidationError{File: file, Msg: "invalid document"}
+	if node.Kind != yaml.DocumentNode {
+		return &ValidationError{File: file, Msg: "expected document node"}
+	}
+	if len(node.Content) == 0 {
+		return &ValidationError{File: file, Msg: "empty document"}
 	}
 	doc := node.Content[0]
 	if doc.Kind != yaml.MappingNode {
 		return &ValidationError{File: file, Line: doc.Line, Msg: "root must be object"}
 	}
 
-	apiVersion, err := requireField(doc, "apiVersion")
+	apiVersionNode, err := requireField(doc, "apiVersion")
 	if err != nil {
 		return &ValidationError{File: file, Msg: "apiVersion is required"}
 	}
-	if err := validateString(apiVersion, "apiVersion"); err != nil {
-		return &ValidationError{File: file, Line: apiVersion.Line, Msg: err.Error()}
+	if err := validateString(apiVersionNode, "apiVersion"); err != nil {
+		return &ValidationError{File: file, Line: apiVersionNode.Line, Msg: err.Error()}
 	}
-	if apiVersion.Value != "v1" {
-		return &ValidationError{File: file, Line: apiVersion.Line, Msg: fmt.Sprintf("apiVersion has unsupported value '%s'", apiVersion.Value)}
+	if apiVersionNode.Value != "v1" {
+		return &ValidationError{File: file, Line: apiVersionNode.Line, Msg: fmt.Sprintf("apiVersion has unsupported value '%s'", apiVersionNode.Value)}
 	}
 
-	kind, err := requireField(doc, "kind")
+	kindNode, err := requireField(doc, "kind")
 	if err != nil {
 		return &ValidationError{File: file, Msg: "kind is required"}
 	}
-	if err := validateString(kind, "kind"); err != nil {
-		return &ValidationError{File: file, Line: kind.Line, Msg: err.Error()}
+	if err := validateString(kindNode, "kind"); err != nil {
+		return &ValidationError{File: file, Line: kindNode.Line, Msg: err.Error()}
 	}
-	if kind.Value != "Pod" {
-		return &ValidationError{File: file, Line: kind.Line, Msg: fmt.Sprintf("kind has unsupported value '%s'", kind.Value)}
+	if kindNode.Value != "Pod" {
+		return &ValidationError{File: file, Line: kindNode.Line, Msg: fmt.Sprintf("kind has unsupported value '%s'", kindNode.Value)}
 	}
 
-	metadata, err := requireField(doc, "metadata")
+	metadataNode, err := requireField(doc, "metadata")
 	if err != nil {
 		return &ValidationError{File: file, Msg: "metadata is required"}
 	}
-	if err := validateObjectMeta(metadata, file); err != nil {
+	if err := validateObjectMeta(metadataNode, file); err != nil {
 		return err
 	}
 
-	spec, err := requireField(doc, "spec")
+	specNode, err := requireField(doc, "spec")
 	if err != nil {
 		return &ValidationError{File: file, Msg: "spec is required"}
 	}
-	if err := validatePodSpec(spec, file); err != nil {
+	if err := validatePodSpec(specNode, file); err != nil {
 		return err
 	}
 
@@ -321,22 +359,31 @@ func validateTopLevel(node *yaml.Node, file string) error {
 }
 
 func validateFile(path string) error {
-	content, err := os.ReadFile(path)
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return fmt.Errorf("cannot resolve absolute path: %w", err)
+	}
+
+	content, err := os.ReadFile(absPath)
 	if err != nil {
 		return fmt.Errorf("cannot read file: %w", err)
 	}
+
 	var root yaml.Node
 	if err := yaml.Unmarshal(content, &root); err != nil {
 		return &ValidationError{File: path, Msg: "cannot unmarshal YAML"}
 	}
+
 	if len(root.Content) == 0 {
 		return &ValidationError{File: path, Msg: "empty YAML"}
 	}
-	for _, doc := range root.Content {
-		if err := validateTopLevel(doc, path); err != nil {
+
+	for _, docNode := range root.Content {
+		if err := validateTopLevel(docNode, path); err != nil {
 			return err
 		}
 	}
+
 	return nil
 }
 
@@ -345,12 +392,16 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Usage: %s <yaml-file>\n", os.Args[0])
 		os.Exit(1)
 	}
-	if err := validateFile(os.Args[1]); err != nil {
+
+	filePath := os.Args[1]
+	if err := validateFile(filePath); err != nil {
 		if ve, ok := err.(*ValidationError); ok {
 			fmt.Fprintln(os.Stderr, ve.Error())
 		} else {
-			fmt.Fprintf(os.Stderr, "%s %s\n", os.Args[1], err.Error())
+			fmt.Fprintf(os.Stderr, "%s %s\n", filePath, err.Error())
 		}
 		os.Exit(1)
 	}
+
+	os.Exit(0)
 }
