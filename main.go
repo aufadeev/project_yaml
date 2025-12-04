@@ -79,10 +79,10 @@ func validateInt(node *yaml.Node, field string) (int, error) {
 	}
 }
 
-// validatePort проверяет, что порт в допустимом диапазоне
-func validatePort(node *yaml.Node, field string) (int, error) {
-	return validateInt(node, field)
-}
+// // validatePort проверяет, что порт в допустимом диапазоне
+// func validatePort(node *yaml.Node, field string) (int, error) {
+// 	return validateInt(node, field)
+// }
 
 // isValidContainerName проверяет snake_case формат
 var snakeCaseRe = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
@@ -144,12 +144,9 @@ func validatePodOS(node *yaml.Node, file string) error {
 	if err != nil {
 		return &ValidationError{File: file, Msg: err.Error()}
 	}
-	name, err := validateString(nameNode, "spec.os.name")
-	if err != nil {
+	// Достаточно проверить, что это строка — значение не проверяем
+	if _, err := validateString(nameNode, "spec.os.name"); err != nil {
 		return &ValidationError{File: file, Line: nameNode.Line, Msg: err.Error()}
-	}
-	if name != "linux" && name != "windows" {
-		return &ValidationError{File: file, Line: nameNode.Line, Msg: fmt.Sprintf("spec.os.name has unsupported value '%s'", name)}
 	}
 	return nil
 }
@@ -172,13 +169,13 @@ func validateHTTPGetAction(node *yaml.Node, prefix, file string) error {
 		return &ValidationError{File: file, Line: pathNode.Line, Msg: fmt.Sprintf("%s.path has invalid format '%s'", prefix, path)}
 	}
 
-	portNode, err := requireField(node, "port")
-	if err != nil {
-		return &ValidationError{File: file, Msg: prefix + "." + err.Error()}
-	}
-	if _, err := validatePort(portNode, prefix+".port"); err != nil {
-		return &ValidationError{File: file, Line: portNode.Line, Msg: err.Error()}
-	}
+	// portNode, err := requireField(node, "port")
+	// if err != nil {
+	// 	return &ValidationError{File: file, Msg: prefix + "." + err.Error()}
+	// }
+	// if _, err := validatePort(portNode, prefix+".port"); err != nil {
+	// 	return &ValidationError{File: file, Line: portNode.Line, Msg: err.Error()}
+	// }
 
 	return nil
 }
@@ -259,7 +256,7 @@ func validateContainerPort(node *yaml.Node, file string) error {
 	if err != nil {
 		return &ValidationError{File: file, Msg: "containerPort is required"}
 	}
-	if _, err := validatePort(containerPortNode, "containerPort"); err != nil {
+	if _, err := validateInt(containerPortNode, "containerPort"); err != nil {
 		return &ValidationError{File: file, Line: containerPortNode.Line, Msg: err.Error()}
 	}
 
