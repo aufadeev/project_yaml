@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -27,17 +28,18 @@ var memoryRegex = regexp.MustCompile(`^\d+(Gi|Mi|Ki)$`)
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "Usage: yamlvalid <path-to-yaml-file>")
+		fmt.Fprintf(os.Stderr, "Usage: yamlvalid <path-to-yaml-file>\n")
 		os.Exit(1)
 	}
 
 	filename := os.Args[1]
+	basename := filepath.Base(filename)
 	errors := validateFile(filename)
 
 	if len(errors) > 0 {
 		for _, err := range errors {
 			if err.Line > 0 {
-				fmt.Fprintf(os.Stderr, "%s:%d %s\n", filename, err.Line, err.Message)
+				fmt.Fprintf(os.Stderr, "%s:%d %s\n", basename, err.Line, err.Message)
 			} else {
 				fmt.Fprintf(os.Stderr, "%s\n", err.Message)
 			}
@@ -411,16 +413,17 @@ func validateResourceSpec(node *yaml.Node, fieldName string) []ValidationError {
 
 	fields := parseMapping(node)
 
-	// cpu (optional) - can be int or string with int
+	// cpu (optional) - must be integer type, not string
 	if cpu, exists := fields["cpu"]; exists {
 		if cpu.Kind != yaml.ScalarNode {
 			errors = append(errors, ValidationError{Line: cpu.Line, Message: "cpu must be int"})
 		} else {
-			// CPU must be an integer, not a quoted string
-			// Check the tag to see if it was originally an integer
-			if cpu.Tag == "!!str" {
+			// Check if it's explicitly a string in YAML (quoted)
+			// Tag will be "!!str" for quoted values, "!!int" for unquoted integers
+			if strings.Contains(cpu.Tag, "str") {
 				errors = append(errors, ValidationError{Line: cpu.Line, Message: "cpu must be int"})
 			} else {
+				// Even if not explicitly tagged as string, verify it's a valid integer
 				_, err := strconv.Atoi(cpu.Value)
 				if err != nil {
 					errors = append(errors, ValidationError{Line: cpu.Line, Message: "cpu must be int"})
