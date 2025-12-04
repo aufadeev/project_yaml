@@ -81,14 +81,7 @@ func validateInt(node *yaml.Node, field string) (int, error) {
 
 // validatePort проверяет, что порт в допустимом диапазоне
 func validatePort(node *yaml.Node, field string) (int, error) {
-	port, err := validateInt(node, field)
-	if err != nil {
-		return 0, err
-	}
-	if port <= 0 {
-		return 0, fmt.Errorf("%s value out of range", field)
-	}
-	return port, nil
+	return validateInt(node, field)
 }
 
 // isValidContainerName проверяет snake_case формат
