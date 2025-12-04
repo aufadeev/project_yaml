@@ -84,7 +84,7 @@ func validatePort(node *yaml.Node, field string) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	if port <= 0 || port >= 65536 {
+	if port <= 0 {
 		return 0, fmt.Errorf("%s value out of range", field)
 	}
 	return port, nil
