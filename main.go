@@ -53,14 +53,13 @@ func main() {
 
 	errors := validatePod(doc, basename)
 	
+	for _, errMsg := range errors {
+		fmt.Fprintf(os.Stderr, "%s\n", errMsg)
+	}
+	
 	if len(errors) > 0 {
-		for _, errMsg := range errors {
-			fmt.Fprintln(os.Stderr, errMsg)
-		}
 		os.Exit(1)
 	}
-
-	os.Exit(0)
 }
 
 func validatePod(node *yaml.Node, filename string) []string {
