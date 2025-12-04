@@ -135,6 +135,32 @@ func validateHTTPGetAction(node *yaml.Node, prefix, file string) error {
 	}
 
 	return nil
+}func validateHTTPGetAction(node *yaml.Node, prefix, file string) error {
+	if node.Kind != yaml.MappingNode {
+		return &ValidationError{File: file, Line: node.Line, Msg: prefix + ".httpGet must be object"}
+	}
+
+	pathNode, err := requireField(node, "path")
+	if err != nil {
+		return &ValidationError{File: file, Msg: prefix + ".path is required"}
+	}
+	if err := validateString(pathNode, prefix+".path"); err != nil {
+		return &ValidationError{File: file, Line: pathNode.Line, Msg: err.Error()}
+	}
+	if !strings.HasPrefix(pathNode.Value, "/") {
+		return &ValidationError{File: file, Line: pathNode.Line, Msg: fmt.Sprintf("%s.path has invalid format '%s'", prefix, pathNode.Value)}
+	}
+
+	portNode, err := requireField(node, "port")
+	if err != nil {
+		return &ValidationError{File: file, Msg: prefix + ".port is required"}
+	}
+	// ИСПОЛЬЗУЕМ validateInt, НЕ validatePort!
+	if err := validateInt(portNode, prefix+".port"); err != nil {
+		return &ValidationError{File: file, Line: portNode.Line, Msg: err.Error()}
+	}
+
+	return nil
 }
 
 func validateProbe(node *yaml.Node, prefix, file string) error {
