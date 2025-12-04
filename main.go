@@ -361,7 +361,6 @@ func validateResourceRequirements(node *yaml.Node) error {
 }
 
 func validateResourceMap(node *yaml.Node) error {
-	h := newHelper(node)
 	for i := 0; i < len(node.Content); i += 2 {
 		keyNode := node.Content[i]
 		valNode := node.Content[i+1]
@@ -381,8 +380,7 @@ func validateResourceMap(node *yaml.Node) error {
 			if !isValidMemory(valNode.Value) {
 				return &ValidationError{Line: valNode.Line, Message: "resources.*.memory has invalid format '" + valNode.Value + "'"}
 			}
-		default:
-			// игнорируем неизвестные ресурсы, т.к. требования — только cpu/memory
+		// остальные ресурсы игнорируем
 		}
 	}
 	return nil
